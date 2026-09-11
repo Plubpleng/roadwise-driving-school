@@ -39,7 +39,7 @@ begin
   select coalesce(max(queue_number), 0) + 1 into v_queue from public.bookings where booking_date = p_booking_date and service = p_service;
   if v_queue > 10 then raise exception 'คิวของบริการนี้เต็มแล้ว'; end if;
   insert into public.bookings (booking_code, full_name, phone, service, booking_date, time_slot, queue_number)
-  values ('RDS-' || upper(substr(encode(gen_random_bytes(4), 'hex'), 1, 6)), trim(p_full_name), p_phone, p_service, p_booking_date, '07:00 – สิ้นสุดการเรียน', v_queue)
+  values ('RDS-' || upper(substr(encode(extensions.gen_random_bytes(4), 'hex'), 1, 6)), trim(p_full_name), p_phone, p_service, p_booking_date, '07:00 – สิ้นสุดการเรียน', v_queue)
   returning * into v_booking;
   return v_booking;
 end;
