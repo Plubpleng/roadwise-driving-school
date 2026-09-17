@@ -41,7 +41,7 @@ function Icon({ name, size = 22 }: { name: string; size?: number }) {
   return <svg {...common}>{paths[name]}</svg>;
 }
 
-function Logo() { return <div className="brand"><span className="brand-mark"><Icon name="car" size={23}/></span><span><b>ROADWISE</b><small>DRIVING SCHOOL</small></span></div>; }
+function Logo() { return <div className="brand"><span className="brand-mark"><Icon name="car" size={23}/></span><span><b>UPD</b><small>Driving School</small></span></div>; }
 
 export default function Page() {
   const [view, setView] = useState<View>("home");
@@ -109,7 +109,7 @@ export default function Page() {
     if (!booking) return;
     const canvas = document.createElement("canvas"); canvas.width = 1200; canvas.height = 1500; const ctx = canvas.getContext("2d"); if (!ctx) return;
     ctx.fillStyle = "#f5f9ff"; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.fillStyle = "#082c63"; ctx.fillRect(0, 0, canvas.width, 260);
-    ctx.fillStyle = "#fff"; ctx.font = "bold 48px Arial"; ctx.fillText("ROADWISE", 80, 110); ctx.font = "28px Arial"; ctx.fillText("DRIVING SCHOOL", 84, 155); ctx.font = "bold 44px Arial"; ctx.fillText("ใบยืนยันการจองคิว", 80, 225);
+    ctx.fillStyle = "#fff"; ctx.font = "bold 48px Arial"; ctx.fillText("UPD", 80, 105); ctx.font = "28px Arial"; ctx.fillText("Driving School", 84, 150); ctx.font = "bold 44px Arial"; ctx.fillText("ใบยืนยันการจองคิว", 80, 225);
     ctx.fillStyle = "#082c63"; ctx.font = "bold 72px Arial"; ctx.fillText(booking.code, 80, 390); ctx.font = "28px Arial"; ctx.fillText("Booking Code", 83, 430);
     const rows = [["ชื่อผู้จอง", booking.name], ["เบอร์โทรศัพท์", booking.phone], ["บริการ", `${services[booking.service as ServiceKey].title} (${services[booking.service].short})`], ["วันที่", booking.date], ["ช่วงเวลา", booking.slot], ["เลขคิว", String(booking.queue)]];
     ctx.font = "28px Arial"; rows.forEach((r, i) => { const y = 540 + i * 115; ctx.fillStyle = "#6f829c"; ctx.fillText(r[0], 85, y); ctx.fillStyle = "#132d52"; ctx.font = "bold 32px Arial"; ctx.fillText(r[1], 85, y + 42); ctx.font = "28px Arial"; });
@@ -125,13 +125,13 @@ export default function Page() {
       {view === "search" && <Search query={query} setQuery={setQuery} searched={searched} onSearch={async () => { try { const rows = await callRpc<DbBooking[]>("find_booking", { p_booking_code: query.code, p_phone: query.phone }); setSearched(rows[0] ? toBooking(rows[0]) : null); } catch { setSearched(null); } }} onBack={() => setView("home")} />}
       {view === "staff" && <Staff service={staffService} setService={setStaffService} date={staffDate} setDate={setStaffDate} bookings={bookings} onBack={() => setView("home")} error={error} />}
     </main>
-    <footer><span>© 2026 Roadwise Driving School</span><span className="footer-status"><i/> ระบบพร้อมให้บริการ</span></footer>
+    <footer><span>© 2026 Driving School</span><span className="footer-status"><i/> ระบบพร้อมให้บริการ</span></footer>
   </div>;
 }
 
 function Home({ onBook, onSearch, onStaff, todayQueueCount }: { onBook: (s: ServiceKey) => void; onSearch: () => void; onStaff: () => void; todayQueueCount: number | null }) {
   return <>
-    <section className="hero"><div className="hero-copy"><p className="eyebrow">ONLINE QUEUE SYSTEM</p><h1>โรงเรียน<br/><em>สอนขับรถ</em></h1><p className="hero-text">ระบบจองคิวออนไลน์<br/></p><div className="hero-actions"><button className="primary" onClick={() => onBook("practice")}>จองคิว <Icon name="arrow" size={18}/></button><button className="text-button" onClick={onSearch}>ค้นหาการจอง <Icon name="search" size={18}/></button></div></div><div className="hero-visual"><div className="road-line"/><div className="sign-card"><span>คิววันนี้</span><strong>{todayQueueCount === null ? "—" : String(todayQueueCount).padStart(2, "0")}</strong><small>{todayQueueCount === null ? "กำลังโหลด" : "กำลังรอเรียก"}</small></div><div className="hero-orb orb-one"/><div className="hero-orb orb-two"/></div></section>
+    <section className="hero"><div className="hero-copy"><p className="eyebrow"></p><h1>โรงเรียนสอนขับรถ<br/><em>ยูพีดีนครปฐม</em></h1><p className="hero-text">(UPD Driving School)<br/></p><div className="hero-actions"><button className="primary" onClick={() => onBook("practice")}>จองคิว <Icon name="arrow" size={18}/></button><button className="text-button" onClick={onSearch}>ค้นหาการจอง <Icon name="search" size={18}/></button></div></div><div className="hero-visual"><div className="road-line"/><div className="sign-card"><span>คิววันนี้</span><strong>{todayQueueCount === null ? "—" : String(todayQueueCount).padStart(2, "0")}</strong><small>{todayQueueCount === null ? "กำลังโหลด" : "กำลังรอเรียก"}</small></div><div className="hero-orb orb-one"/><div className="hero-orb orb-two"/></div></section>
     <section className="section-block"><div className="section-head"><div><h2>เลือกบริการที่ต้องการ</h2><p>ทุกบริการรับจำนวนจำกัด 10 คิวต่อวัน</p></div><span className="open-hours"><Icon name="calendar" size={17}/> เปิด 07:00 น. เป็นต้นไป</span></div><div className="service-grid">{Object.entries(services).map(([key, s]) => <button className="service-card" key={key} onClick={() => onBook(key as ServiceKey)}><span className={`service-icon ${s.color}`}><Icon name={key === "practice" ? "car" : key === "theory" ? "book" : "refresh"}/></span><span className="service-info"><b>{s.title}</b><small>{s.short} · {s.days}</small><span>{s.detail}</span></span><Icon name="arrow" size={20}/></button>)}</div></section>
     <section className="lower-grid"><div className="guide-panel"><div className="panel-title"><span className="number-badge">01</span><div><h3>จองคิวใน 3 ขั้นตอน</h3><p>สะดวก รวดเร็ว ไม่ต้องรอที่โรงเรียน</p></div></div><div className="steps"><div><strong>เลือกบริการ</strong><span>เลือกประเภทบริการที่ต้องการ</span></div><div><strong>เลือกวันที่</strong><span>ระบบเปิดให้บริการตั้งแต่ 07:00 น. เป็นต้นไป</span></div><div><strong>รับใบยืนยัน</strong><span>บันทึกภาพใบยืนยันไว้แสดงต่อเจ้าหน้าที่</span></div></div></div><button className="search-panel" onClick={onSearch}><span className="search-panel-icon"><Icon name="search" size={25}/></span><span><b>ค้นหาการจองคิว</b><small>ตรวจสอบข้อมูลและสถานะคิว<br/>ด้วย Booking Code และเบอร์โทรศัพท์</small></span><Icon name="arrow" size={20}/></button></section>
     <button className="staff-entry" onClick={onStaff}><Icon name="shield" size={16}/> สำหรับเจ้าหน้าที่</button>

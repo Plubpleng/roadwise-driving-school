@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Roadwise Driving School | ระบบจองคิวออนไลน์",
-  description: "ระบบจองคิวโรงเรียนสอนขับรถ Roadwise",
+  title: "Driving School | ระบบจองคิวออนไลน์",
+  description: "ระบบจองคิวโรงเรียนสอนขับรถ",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
