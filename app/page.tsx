@@ -17,6 +17,13 @@ const services: Record<ServiceKey, { title: string; short: string; detail: strin
 };
 const bookingSlot = "07:00 – สิ้นสุดการเรียน";
 const slots = [bookingSlot];
+const todayIso = () => { const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`; };
+const rpcErrorMessage = (cause: unknown) => {
+  const raw = cause instanceof Error ? cause.message : String(cause ?? "");
+  try { const parsed = JSON.parse(raw); if (parsed?.message) return parsed.message; } catch {}
+  const match = raw.match(/message:\s*([^,}]+)/i);
+  return (match?.[1] || raw).replace(/^['"]|['"]$/g, "").trim() || "ดำเนินการไม่สำเร็จ";
+};
 function Icon({ name, size = 22 }: { name: string; size?: number }) {
   const common = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
   const paths: Record<string, React.ReactNode> = {
@@ -50,6 +57,15 @@ export default function Page() {
   const [searched, setSearched] = useState<Booking | null>(null);
   const [staffService, setStaffService] = useState<ServiceKey>("practice");
   const [staffDate, setStaffDate] = useState("2026-09-14");
+  const [todayQueueCount, setTodayQueueCount] = useState<number | null>(null);
+  const [bookedCount, setBookedCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (view !== "home") return;
+    callRpc<number>("get_today_queue_count", { p_booking_date: todayIso() })
+      .then((count) => setTodayQueueCount(Number(count)))
+      .catch(() => setTodayQueueCount(null));
+  }, [view]);
 
   useEffect(() => {
     if (view !== "staff") return;
@@ -57,6 +73,17 @@ export default function Page() {
       .then((rows) => setBookings(rows.map(toBooking)))
       .catch((cause) => setError(cause instanceof Error ? cause.message : "โหลดข้อมูลคิวไม่สำเร็จ"));
   }, [view, staffService, staffDate]);
+
+  useEffect(() => {
+    if (view !== "book" || !service || !validDay(service, date)) { setBookedCount(null); return; }
+    let active = true;
+    const loadAvailability = () => callRpc<DbBooking[]>("list_day_bookings", { p_service: service, p_booking_date: date })
+      .then((rows) => { if (active) setBookedCount(rows.length); })
+      .catch(() => { if (active) setBookedCount(null); });
+    loadAvailability();
+    const timer = window.setInterval(loadAvailability, 5000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [view, service, date]);
 
   const validDay = (key: ServiceKey, value: string) => { const day = new Date(`${value}T12:00:00`).getDay(); return key === "renew" || (key === "theory" ? day === 0 : day !== 0); };
   const dateLabel = new Intl.DateTimeFormat("th-TH", { day: "numeric", month: "long", year: "numeric" }).format(new Date(`${date}T12:00:00`));
@@ -69,7 +96,13 @@ export default function Page() {
       const row = await callRpc<DbBooking>("create_booking", { p_full_name: form.name, p_phone: form.phone, p_service: service, p_booking_date: date, p_time_slot: slot });
       setBooking(toBooking(row));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message.replace(/[{}\"]+/g, "") : "บันทึกการจองไม่สำเร็จ");
+      const message = rpcErrorMessage(cause);
+      if (message.includes("คิวของบริการนี้เต็มแล้ว")) {
+        setBookedCount(10);
+        setError("คิวเต็มแล้ว กรุณาเลือกวันอื่น");
+      } else {
+        setError(message);
+      }
     } finally { setIsSubmitting(false); }
   }
   function downloadReceipt() {
@@ -87,8 +120,8 @@ export default function Page() {
   return <div className="app-shell">
     <header className="topbar"><div className="topbar-inner"><Logo/><button className="home-link" onClick={() => setView("home")}>หน้าหลัก <Icon name="arrow" size={18}/></button></div></header>
     <main className="page-wrap">
-      {view === "home" && <Home onBook={startBooking} onSearch={() => setView("search")} onStaff={() => setView("staff")} />}
-      {view === "book" && <BookingFlow service={service} setService={setService} date={date} setDate={setDate} slot={slot} setSlot={setSlot} form={form} setForm={setForm} validDay={validDay} dateLabel={dateLabel} onBack={() => setView("home")} onConfirm={confirmBooking} booking={booking} onDownload={downloadReceipt} error={error} isSubmitting={isSubmitting} />}
+      {view === "home" && <Home onBook={startBooking} onSearch={() => setView("search")} onStaff={() => setView("staff")} todayQueueCount={todayQueueCount} />}
+      {view === "book" && <BookingFlow service={service} setService={setService} date={date} setDate={setDate} slot={slot} setSlot={setSlot} form={form} setForm={setForm} validDay={validDay} dateLabel={dateLabel} onBack={() => setView("home")} onConfirm={confirmBooking} booking={booking} onDownload={downloadReceipt} error={error} isSubmitting={isSubmitting} availableCount={bookedCount === null ? null : Math.max(0, 10 - bookedCount)} />}
       {view === "search" && <Search query={query} setQuery={setQuery} searched={searched} onSearch={async () => { try { const rows = await callRpc<DbBooking[]>("find_booking", { p_booking_code: query.code, p_phone: query.phone }); setSearched(rows[0] ? toBooking(rows[0]) : null); } catch { setSearched(null); } }} onBack={() => setView("home")} />}
       {view === "staff" && <Staff service={staffService} setService={setStaffService} date={staffDate} setDate={setStaffDate} bookings={bookings} onBack={() => setView("home")} error={error} />}
     </main>
@@ -96,18 +129,18 @@ export default function Page() {
   </div>;
 }
 
-function Home({ onBook, onSearch, onStaff }: { onBook: (s: ServiceKey) => void; onSearch: () => void; onStaff: () => void }) {
+function Home({ onBook, onSearch, onStaff, todayQueueCount }: { onBook: (s: ServiceKey) => void; onSearch: () => void; onStaff: () => void; todayQueueCount: number | null }) {
   return <>
-    <section className="hero"><div className="hero-copy"><p className="eyebrow">ONLINE QUEUE SYSTEM</p><h1>โรงเรียน<br/><em>สอนขับรถ</em></h1><p className="hero-text">ระบบจองคิวออนไลน์<br/></p><div className="hero-actions"><button className="primary" onClick={() => onBook("practice")}>จองคิว <Icon name="arrow" size={18}/></button><button className="text-button" onClick={onSearch}>ค้นหาการจอง <Icon name="search" size={18}/></button></div></div><div className="hero-visual"><div className="road-line"/><div className="sign-card"><span>คิววันนี้</span><strong>03</strong><small>กำลังรอเรียก</small></div><div className="hero-orb orb-one"/><div className="hero-orb orb-two"/></div></section>
+    <section className="hero"><div className="hero-copy"><p className="eyebrow">ONLINE QUEUE SYSTEM</p><h1>โรงเรียน<br/><em>สอนขับรถ</em></h1><p className="hero-text">ระบบจองคิวออนไลน์<br/></p><div className="hero-actions"><button className="primary" onClick={() => onBook("practice")}>จองคิว <Icon name="arrow" size={18}/></button><button className="text-button" onClick={onSearch}>ค้นหาการจอง <Icon name="search" size={18}/></button></div></div><div className="hero-visual"><div className="road-line"/><div className="sign-card"><span>คิววันนี้</span><strong>{todayQueueCount === null ? "—" : String(todayQueueCount).padStart(2, "0")}</strong><small>{todayQueueCount === null ? "กำลังโหลด" : "กำลังรอเรียก"}</small></div><div className="hero-orb orb-one"/><div className="hero-orb orb-two"/></div></section>
     <section className="section-block"><div className="section-head"><div><h2>เลือกบริการที่ต้องการ</h2><p>ทุกบริการรับจำนวนจำกัด 10 คิวต่อวัน</p></div><span className="open-hours"><Icon name="calendar" size={17}/> เปิด 07:00 น. เป็นต้นไป</span></div><div className="service-grid">{Object.entries(services).map(([key, s]) => <button className="service-card" key={key} onClick={() => onBook(key as ServiceKey)}><span className={`service-icon ${s.color}`}><Icon name={key === "practice" ? "car" : key === "theory" ? "book" : "refresh"}/></span><span className="service-info"><b>{s.title}</b><small>{s.short} · {s.days}</small><span>{s.detail}</span></span><Icon name="arrow" size={20}/></button>)}</div></section>
     <section className="lower-grid"><div className="guide-panel"><div className="panel-title"><span className="number-badge">01</span><div><h3>จองคิวใน 3 ขั้นตอน</h3><p>สะดวก รวดเร็ว ไม่ต้องรอที่โรงเรียน</p></div></div><div className="steps"><div><strong>เลือกบริการ</strong><span>เลือกประเภทบริการที่ต้องการ</span></div><div><strong>เลือกวันที่</strong><span>ระบบเปิดให้บริการตั้งแต่ 07:00 น. เป็นต้นไป</span></div><div><strong>รับใบยืนยัน</strong><span>บันทึกภาพใบยืนยันไว้แสดงต่อเจ้าหน้าที่</span></div></div></div><button className="search-panel" onClick={onSearch}><span className="search-panel-icon"><Icon name="search" size={25}/></span><span><b>ค้นหาการจองคิว</b><small>ตรวจสอบข้อมูลและสถานะคิว<br/>ด้วย Booking Code และเบอร์โทรศัพท์</small></span><Icon name="arrow" size={20}/></button></section>
     <button className="staff-entry" onClick={onStaff}><Icon name="shield" size={16}/> สำหรับเจ้าหน้าที่</button>
   </>;
 }
 
-function BookingFlow({ service, setService, date, setDate, slot, setSlot, form, setForm, validDay, dateLabel, onBack, onConfirm, booking, onDownload, error, isSubmitting }: any) {
+function BookingFlow({ service, setService, date, setDate, slot, setSlot, form, setForm, validDay, dateLabel, onBack, onConfirm, booking, onDownload, error, isSubmitting, availableCount }: any) {
   return <section className="flow-wrap"><button className="back-link" onClick={onBack}>← กลับหน้าหลัก</button><div className="flow-heading"><div><p className="eyebrow">BOOK A QUEUE</p><h1>จองคิวของคุณ</h1><p>กรอกข้อมูลให้ครบ แล้วเราจะเตรียมคิวที่เหมาะกับคุณ</p></div><div className="stepper"><span className="active">1 <small>บริการ</small></span><i/><span className={service ? "active" : ""}>2 <small>วันและเวลา</small></span><i/><span className={booking ? "active" : ""}>3 <small>ยืนยัน</small></span></div></div>
-    {!booking ? <div className="booking-layout"><div className="booking-main"><div className="form-section"><h3>เลือกบริการ</h3><div className="mini-service-grid">{Object.entries(services).map(([key, s]) => <button key={key} className={`mini-service ${service === key ? "selected" : ""}`} onClick={() => setService(key)}><span className={`service-icon ${s.color}`}><Icon name={key === "practice" ? "car" : key === "theory" ? "book" : "refresh"} size={19}/></span><span><b>{s.title}</b><small>{s.days}</small></span>{service === key && <Icon name="check" size={19}/>}</button>)}</div></div><div className="form-section"><h3>เลือกวันที่</h3><div className="date-row"><label>วันที่นัดหมาย<input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></label><div className="selected-date"><Icon name="calendar" size={18}/><span>{dateLabel}</span></div></div>{service && !validDay(service, date) && <p className="form-error">บริการนี้ไม่เปิดในวันที่เลือก กรุณาเลือกวันใหม่</p>}<div className="slot-grid">{slots.map((x) => <button key={x} className="slot selected" onClick={() => setSlot(x)}><span>{x}</span><small>10 คิวว่าง</small></button>)}</div></div><div className="form-section"><h3>ข้อมูลผู้จอง</h3><div className="input-grid"><label>ชื่อ – นามสกุล<input placeholder="เช่น สมชาย ใจดี" value={form.name} onChange={(e) => setForm({...form, name: e.target.value})}/></label><label>เบอร์โทรศัพท์<input inputMode="tel" placeholder="08X-XXX-XXXX" value={form.phone} onChange={(e) => setForm({...form, phone: e.target.value.replace(/[^0-9]/g, "")})}/></label></div></div>{error && <p className="form-error">{error}</p>}<button className="primary full" disabled={!service || !validDay(service, date) || !form.name || form.phone.length < 9 || isSubmitting} onClick={onConfirm}>{isSubmitting ? "กำลังบันทึก..." : "ยืนยันการจองคิว"} <Icon name="arrow" size={18}/></button></div><aside className="summary-card"><div className="summary-top"><span>สรุปการจอง</span><Icon name="check" size={20}/></div>{service ? <><h3>{services[service as ServiceKey].title}</h3><p>{services[service as ServiceKey].short}</p><hr/><div className="summary-row"><span>วันที่</span><b>{dateLabel}</b></div><div className="summary-row"><span>ช่วงเวลา</span><b>{slot}</b></div><div className="summary-note"><Icon name="shield" size={16}/> ข้อมูลของคุณจะถูกใช้เพื่อการจองคิวเท่านั้น</div></> : <div className="summary-empty"><Icon name="calendar" size={30}/><p>เลือกบริการเพื่อดู<br/>รายละเอียดการจอง</p></div>}</aside></div> : <Confirmation booking={booking} onDownload={onDownload} onHome={onBack} />}
+    {!booking ? <div className="booking-layout"><div className="booking-main"><div className="form-section"><h3>เลือกบริการ</h3><div className="mini-service-grid">{Object.entries(services).map(([key, s]) => <button key={key} className={`mini-service ${service === key ? "selected" : ""}`} onClick={() => setService(key)}><span className={`service-icon ${s.color}`}><Icon name={key === "practice" ? "car" : key === "theory" ? "book" : "refresh"} size={19}/></span><span><b>{s.title}</b><small>{s.days}</small></span>{service === key && <Icon name="check" size={19}/>}</button>)}</div></div><div className="form-section"><h3>เลือกวันที่</h3><div className="date-row"><label>วันที่นัดหมาย<input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></label><div className="selected-date"><Icon name="calendar" size={18}/><span>{dateLabel}</span></div></div>{service && !validDay(service, date) && <p className="form-error">บริการนี้ไม่เปิดในวันที่เลือก กรุณาเลือกวันใหม่</p>}<div className="slot-grid">{slots.map((x) => <button key={x} className="slot selected" disabled={availableCount === 0} onClick={() => setSlot(x)}><span>{x}</span><small>{availableCount === null ? "กำลังเช็คคิว..." : availableCount === 0 ? "คิวเต็มแล้ว" : String(availableCount) + " คิวว่าง"}</small></button>)}</div>{availableCount === 0 && <div className="queue-full-alert" role="alert"><strong>คิวเต็มแล้ว</strong><span>บริการนี้มีผู้จองครบ 10 คิวสำหรับวันที่เลือก กรุณาเลือกวันอื่น</span></div>}</div><div className="form-section"><h3>ข้อมูลผู้จอง</h3><div className="input-grid"><label>ชื่อ – นามสกุล<input placeholder="เช่น สมชาย ใจดี" value={form.name} onChange={(e) => setForm({...form, name: e.target.value})}/></label><label>เบอร์โทรศัพท์<input inputMode="tel" placeholder="08X-XXX-XXXX" value={form.phone} onChange={(e) => setForm({...form, phone: e.target.value.replace(/[^0-9]/g, "")})}/></label></div></div>{error && <p className={`form-error ${error.includes("คิวเต็ม") ? "queue-full-error" : ""}`} role="alert">{error}</p>}<button className="primary full" disabled={!service || !validDay(service, date) || !form.name || form.phone.length < 9 || isSubmitting || availableCount === 0} onClick={onConfirm}>{isSubmitting ? "กำลังบันทึก..." : "ยืนยันการจองคิว"} <Icon name="arrow" size={18}/></button></div><aside className="summary-card"><div className="summary-top"><span>สรุปการจอง</span><Icon name="check" size={20}/></div>{service ? <><h3>{services[service as ServiceKey].title}</h3><p>{services[service as ServiceKey].short}</p><hr/><div className="summary-row"><span>วันที่</span><b>{dateLabel}</b></div><div className="summary-row"><span>ช่วงเวลา</span><b>{slot}</b></div><div className="summary-note"><Icon name="shield" size={16}/> ข้อมูลของคุณจะถูกใช้เพื่อการจองคิวเท่านั้น</div></> : <div className="summary-empty"><Icon name="calendar" size={30}/><p>เลือกบริการเพื่อดู<br/>รายละเอียดการจอง</p></div>}</aside></div> : <Confirmation booking={booking} onDownload={onDownload} onHome={onBack} />}
   </section>;
 }
 
@@ -116,8 +149,3 @@ function Confirmation({ booking, onDownload, onHome }: { booking: Booking; onDow
 function Search({ query, setQuery, searched, onSearch, onBack }: any) { return <section className="simple-page"><button className="back-link" onClick={onBack}>← กลับหน้าหลัก</button><div className="simple-heading"><p className="eyebrow">FIND YOUR BOOKING</p><h1>ค้นหาการจองคิว</h1><p>ใช้ Booking Code และเบอร์โทรศัพท์ที่กรอกตอนจอง</p></div><div className="search-box"><div className="input-grid"><label>Booking Code<input placeholder="เช่น RDS-7K2M9P" value={query.code} onChange={(e: any) => setQuery({...query, code: e.target.value.toUpperCase()})}/></label><label>เบอร์โทรศัพท์<input placeholder="08X-XXX-XXXX" value={query.phone} onChange={(e: any) => setQuery({...query, phone: e.target.value.replace(/[^0-9]/g, "")})}/></label></div><button className="primary full" onClick={onSearch}>ค้นหาการจอง <Icon name="search" size={18}/></button></div>{searched ? <div className="search-result"><div><span className="status-chip"><i/> {searched.status}</span><h3>{services[searched.service as ServiceKey].title}</h3><p>{searched.name} · {searched.phone}</p></div><strong className="result-queue">คิว {String(searched.queue).padStart(2, "0")}</strong><div className="result-meta"><span><Icon name="calendar" size={16}/> {searched.date}</span><span>ช่วงเวลา {searched.slot}</span><span>Code {searched.code}</span></div></div> : query.code && <p className="not-found">ไม่พบข้อมูลการจอง กรุณาตรวจสอบ Booking Code และเบอร์โทรศัพท์อีกครั้ง</p>}</section>; }
 
 function Staff({ service, setService, date, setDate, bookings, onBack }: any) { return <section className="staff-page"><button className="back-link" onClick={onBack}>← กลับหน้าหลัก</button><div className="staff-heading"><div><p className="eyebrow">STAFF CONSOLE</p><h1>จัดการคิววันนี้</h1><p>ตรวจสอบรายชื่อผู้จองและสถานะคิวแยกตามบริการ</p></div><span className="staff-live"><i/> LIVE</span></div><div className="staff-filters"><label>บริการ<select value={service} onChange={(e) => setService(e.target.value)}>{Object.entries(services).map(([key, s]) => <option key={key} value={key}>{s.title}</option>)}</select></label><label>วันที่<input type="date" value={date} onChange={(e) => setDate(e.target.value)}/></label><div className="capacity"><b>{bookings.length}<small>/ 10</small></b><span>คิวที่จองแล้ว</span></div></div><div className="staff-table"><div className="table-head"><span>คิว</span><span>ผู้จอง</span><span>ช่วงเวลา</span><span>สถานะ</span></div>{bookings.length ? bookings.map((b: Booking) => <div className="table-row" key={b.code}><strong>{String(b.queue).padStart(2, "0")}</strong><span><b>{b.name}</b><small>{b.phone}</small></span><span>{b.slot}</span><span className={`status-text ${b.status === "กำลังดำเนินการ" ? "doing" : ""}`}><i/> {b.status}</span></div>) : <div className="table-empty">ยังไม่มีรายการจองในวันนี้</div>}</div></section>; }
-
-
-
-
-

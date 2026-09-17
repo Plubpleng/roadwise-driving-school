@@ -53,6 +53,11 @@ create or replace function public.list_day_bookings(p_service text, p_booking_da
 returns setof public.bookings language sql security definer set search_path = public
 as $$ select * from public.bookings where service = p_service and booking_date = p_booking_date order by queue_number $$;
 
+create or replace function public.get_today_queue_count(p_booking_date date)
+returns integer language sql security definer set search_path = public
+as $$ select count(*)::integer from public.bookings where booking_date = p_booking_date and status = 'รอเรียกคิว' $$;
+
 grant execute on function public.create_booking(text,text,text,date,text) to anon, authenticated;
 grant execute on function public.find_booking(text,text) to anon, authenticated;
 grant execute on function public.list_day_bookings(text,date) to anon, authenticated;
+grant execute on function public.get_today_queue_count(date) to anon, authenticated;
